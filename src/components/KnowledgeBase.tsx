@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FileUp, Trash2, BookTemplate, ScrollText } from 'lucide-react';
 import { KnowledgeItem } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import mammoth from 'mammoth'; // 1. Import library mammoth yang sudah diinstall
 
 interface Props {
   knowledgeBase: KnowledgeItem[];
@@ -24,34 +25,41 @@ export default function KnowledgeBase({ knowledgeBase, onUpdate }: Props) {
     setIsUploading(true);
     setErrorMsg('');
 
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      const res = await fetch('/api/extract-text', {
-        method: 'POST',
-        body: formData,
-      });
+    // 2. Gunakan FileReader untuk membaca file sebagai ArrayBuffer di browser
+    const reader = new FileReader();
+    reader.readAsArrayBuffer(file);
 
-      if (!res.ok) throw new Error('Gagal mengekstrak teks dari file');
+    reader.onload = async (event) => {
+      const arrayBuffer = event.target?.result as ArrayBuffer;
 
-      const data = await res.json();
-      
-      const newItem: KnowledgeItem = {
-        id: uuidv4(),
-        title: file.name,
-        type,
-        content: data.text,
-        dateAdded: new Date().toISOString(),
-      };
+      try {
+        if (!arrayBuffer) throw new Error('Gagal membaca data file');
 
-      onUpdate([newItem, ...knowledgeBase]);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Terjadi kesalahan saat upload');
-    } finally {
+        // 3. Ekstraksi teks murni langsung dari arrayBuffer menggunakan mammoth
+        const result = await mammoth.extractRawText({ arrayBuffer: arrayBuffer });
+        const extractedText = result.value; // Hasil teks murni .docx
+
+        const newItem: KnowledgeItem = {
+          id: uuidv4(),
+          title: file.name,
+          type,
+          content: extractedText, // Masukkan teks hasil ekstraksi ke content
+          dateAdded: new Date().toISOString(),
+        };
+
+        onUpdate([newItem, ...knowledgeBase]);
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Terjadi kesalahan saat mengekstrak file');
+      } finally {
+        setIsUploading(false);
+        if (e.target) e.target.value = '';
+      }
+    };
+
+    reader.onerror = () => {
+      setErrorMsg('Gagal membaca file dari sistem lokal');
       setIsUploading(false);
-      if (e.target) e.target.value = '';
-    }
+    };
   };
 
   const removeKb = (id: string) => {
