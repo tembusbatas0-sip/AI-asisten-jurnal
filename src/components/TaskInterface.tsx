@@ -3,6 +3,7 @@ import { UploadCloud, FileText, CheckCircle2, Download, AlertCircle, RefreshCw }
 import { AnalysisHistory, KnowledgeItem } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import ReactMarkdown from 'react-markdown';
+import mammoth from 'mammoth'; // 1. Import mammoth untuk ekstraksi file naskah
 
 interface Props {
   knowledgeBase: KnowledgeItem[];
@@ -21,6 +22,28 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
     if (e.target.files && e.target.files[0]) {
       setFile(e.target.files[0]);
     }
+  };
+
+  // 2. Fungsi pembantu untuk mengekstrak teks file menggunakan FileReader + Mammoth
+  const extractTextFromFile = (fileToExtract: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsArrayBuffer(fileToExtract);
+      reader.onload = async (e) => {
+        const arrayBuffer = e.target?.result as ArrayBuffer;
+        if (!arrayBuffer) {
+          reject(new Error('Gagal membaca data file naskah.'));
+          return;
+        }
+        try {
+          const res = await mammoth.extractRawText({ arrayBuffer });
+          resolve(res.value);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = () => reject(new Error('Gagal membaca file dari sistem lokal.'));
+    });
   };
 
   const processManuscript = async () => {
@@ -43,15 +66,27 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
         const refs = knowledgeBase.filter(k => k.type === 'reference');
         kbContext = refs.map(r => r.content).join('\n\n---\n\n');
       }
-      
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('role', role);
-      formData.append('kbContext', kbContext);
 
+      // 3. Ekstrak teks naskah penulis langsung di browser
+      const manuscriptText = await extractTextFromFile(file);
+
+      // ----------------------------------------------------------------------
+      // NOTE INTEGRASI GEMINI AI STUDIO:
+      // Di bawah ini adalah tempat kamu menembak langsung ke API Gemini Studio.
+      // Kamu bisa mengganti fetch('/api/analyze') dengan pemanggilan SDK Gemini.
+      // ----------------------------------------------------------------------
+      
+      // Menggunakan placeholder endpoint / contoh fetch sementara:
       const response = await fetch('/api/analyze', {
         method: 'POST',
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: manuscriptText, // Mengirimkan teks hasil ekstraksi, bukan file mentah
+          role: role,
+          kbContext: kbContext,
+        }),
       });
 
       if (!response.ok) {
@@ -62,23 +97,16 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
       setResult(data.result);
 
       // Save to history
-      const activeReferences = role === 'editor' 
-        ? knowledgeBase.filter(k => k.type === 'template').map(t => t.title)
-        : role === 'reviewer'
-          ? knowledgeBase.filter(k => k.type === 'reference').map(r => r.title)
-          : knowledgeBase.map(k => k.title); // copyeditor uses all if available, or maybe references? Wait, the server prompt actually uses kbContext. In my updated copyeditor prompt, it says "Basis Referensi Jurnal Terbitan". So it uses the same as reviewer? Let's just use whatever has content. I'll just check which ones were used.
-      
       let usedRefs: string[] = [];
       if (role === 'editor') usedRefs = knowledgeBase.filter(k => k.type === 'template').map(t => t.title);
-      else if (role === 'reviewer') usedRefs = knowledgeBase.filter(k => k.type === 'reference').map(t => t.title);
-      else if (role === 'copyeditor') usedRefs = knowledgeBase.filter(k => k.type === 'reference').map(t => t.title);
+      else if (role === 'reviewer' || role === 'copyeditor') usedRefs = knowledgeBase.filter(k => k.type === 'reference').map(t => t.title);
 
       onSaveHistory({
         id: uuidv4(),
         filename: file.name,
         role: role,
         date: new Date().toISOString(),
-        originalText: data.originalText,
+        originalText: manuscriptText, // Menggunakan teks yang diekstrak secara lokal
         resultText: data.result,
         kbReferences: usedRefs,
       });
