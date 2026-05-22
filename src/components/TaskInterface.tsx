@@ -3,7 +3,8 @@ import { UploadCloud, FileText, CheckCircle2, Download, AlertCircle, RefreshCw }
 import { AnalysisHistory, KnowledgeItem } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import ReactMarkdown from 'react-markdown';
-import mammoth from 'mammoth'; // 1. Import mammoth untuk ekstraksi file naskah
+import mammoth from 'mammoth'; // Import pembaca .docx di frontend
+import { GoogleGenAI } from '@google/genai'; // Import mesin AI Gemini
 
 interface Props {
   knowledgeBase: KnowledgeItem[];
@@ -24,7 +25,7 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
     }
   };
 
-  // 2. Fungsi pembantu untuk mengekstrak teks file menggunakan FileReader + Mammoth
+  // Fungsi pembantu mengekstrak file .docx langsung di browser
   const extractTextFromFile = (fileToExtract: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -57,7 +58,7 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
     setResult(null);
 
     try {
-      // Build knowledge base contextual string
+      // 1. Susun Basis Pengetahuan (Knowledge Base)
       let kbContext = '';
       if (role === 'editor') {
         const templates = knowledgeBase.filter(k => k.type === 'template');
@@ -67,36 +68,50 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
         kbContext = refs.map(r => r.content).join('\n\n---\n\n');
       }
 
-      // 3. Ekstrak teks naskah penulis langsung di browser
+      // 2. Ekstrak teks naskah penulis secara lokal
       const manuscriptText = await extractTextFromFile(file);
 
-      // ----------------------------------------------------------------------
-      // NOTE INTEGRASI GEMINI AI STUDIO:
-      // Di bawah ini adalah tempat kamu menembak langsung ke API Gemini Studio.
-      // Kamu bisa mengganti fetch('/api/analyze') dengan pemanggilan SDK Gemini.
-      // ----------------------------------------------------------------------
+      // 3. Hubungkan langsung ke SDK Gemini menggunakan API Key dari file .env
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
       
-      // Menggunakan placeholder endpoint / contoh fetch sementara:
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: manuscriptText, // Mengirimkan teks hasil ekstraksi, bukan file mentah
-          role: role,
-          kbContext: kbContext,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Gagal memproses naskah');
+      // 4. Tentukan instruksi spesifik berdasarkan tombol Mode Asisten yang dipilih
+      let systemInstruction = "";
+      if (role === 'editor') {
+        systemInstruction = "Anda adalah seorang Editor Jurnal Ilmiah senior. Tugas Anda adalah memeriksa kesesuaian format naskah naskah berdasarkan gaya selingkung atau template yang disediakan.";
+      } else if (role === 'reviewer') {
+        systemInstruction = "Anda adalah seorang Reviewer Ahli (Mitra Bestari). Tugas Anda adalah menganalisis kedalaman substansi naskah ilmiah, metodologi, dan kontribusi ilmiahnya serta memberikan saran perbaikan konten.";
+      } else {
+        systemInstruction = "Anda adalah seorang Copyeditor Bahasa. Perbaiki naskah berdasarkan aturan PUEBI, ejaan, efektivitas kalimat, dan tata bahasa jurnal ilmiah.";
       }
 
-      const data = await response.json();
-      setResult(data.result);
+      const prompt = `
+        ${systemInstruction}
+        
+        Berikut adalah teks dokumen acuan dari Basis Pengetahuan (Knowledge Base) yang harus kamu ikuti:
+        ${kbContext ? kbContext : "Tidak ada dokumen acuan spesifik yang diunggah. Gunakan standar umum jurnal ilmiah terakreditasi."}
+        
+        Tugas: Analisis naskah penulis di bawah ini. Berikan ulasan/rekomendasi perbaikan. Jika ada bagian kalimat yang direvisi atau diperbaiki, tandai bagian yang diubah dengan cetak tebal (bold) menggunakan format Markdown agar penulis mudah melihat perbedaannya.
+        
+        Naskah Penulis yang Harus Dianalisis:
+        ${manuscriptText}
+      `;
 
-      // Save to history
+      // 5. Panggil model Gemini secara langsung dari browser (Client-Side)
+      const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const response = await model.generateContent({
+        contents: prompt,
+      });
+
+      const aiResultText = response.text;
+      
+      if (!aiResultText) {
+        throw new Error('AI tidak mengembalikan respon yang valid.');
+      }
+
+      // Tampilkan hasil analisis AI ke layar komponen kanan
+      setResult(aiResultText);
+
+      // Simpan riwayat ke menu Riwayat
       let usedRefs: string[] = [];
       if (role === 'editor') usedRefs = knowledgeBase.filter(k => k.type === 'template').map(t => t.title);
       else if (role === 'reviewer' || role === 'copyeditor') usedRefs = knowledgeBase.filter(k => k.type === 'reference').map(t => t.title);
@@ -106,13 +121,14 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
         filename: file.name,
         role: role,
         date: new Date().toISOString(),
-        originalText: manuscriptText, // Menggunakan teks yang diekstrak secara lokal
-        resultText: data.result,
+        originalText: manuscriptText,
+        resultText: aiResultText,
         kbReferences: usedRefs,
       });
 
     } catch (err: any) {
-      setErrorMsg(err.message || 'Terjadi kesalahan sistem');
+      console.error(err);
+      setErrorMsg(err.message || 'Terjadi kesalahan saat meminta analisis dari AI');
     } finally {
       setIsProcessing(false);
     }
@@ -122,6 +138,8 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
     if (!result) return;
     
     try {
+      // Catatan: Jika fitur unduh file ini nanti butuh backend terpisah, pastikan endpoint ini siap. 
+      // Untuk sementara, fungsi ini tetap dipertahankan sesuai struktur kode asli kamu.
       const res = await fetch('/api/generate-docx', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -153,7 +171,7 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
 
       <div className="grid lg:grid-cols-3 gap-8">
         
-        {/* Left column: Controls */}
+        {/* Kolom Kiri: Tombol Unggah & Pilihan Mode */}
         <div className="lg:col-span-1 space-y-6">
           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4">1. Unggah Naskah</h3>
@@ -179,87 +197,4 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
               <label className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${role === 'editor' ? 'border-indigo-500 bg-indigo-50 text-indigo-900' : 'border-slate-200 hover:border-indigo-200 hover:bg-slate-50'}`}>
                 <input type="radio" className="mt-1" checked={role === 'editor'} onChange={() => setRole('editor')} />
                 <div>
-                  <div className="font-semibold text-sm">Editor Jurnal</div>
-                  <div className="text-xs text-slate-500">Cek format & pedoman gaya selingkung</div>
-                </div>
-              </label>
-
-              <label className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${role === 'reviewer' ? 'border-indigo-500 bg-indigo-50 text-indigo-900' : 'border-slate-200 hover:border-indigo-200 hover:bg-slate-50'}`}>
-                <input type="radio" className="mt-1" checked={role === 'reviewer'} onChange={() => setRole('reviewer')} />
-                <div>
-                  <div className="font-semibold text-sm">Reviewer Substansi</div>
-                  <div className="text-xs text-slate-500">Analisis kelayakan terbit & revisi konten</div>
-                </div>
-              </label>
-
-              <label className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${role === 'copyeditor' ? 'border-indigo-500 bg-indigo-50 text-indigo-900' : 'border-slate-200 hover:border-indigo-200 hover:bg-slate-50'}`}>
-                <input type="radio" className="mt-1" checked={role === 'copyeditor'} onChange={() => setRole('copyeditor')} />
-                <div>
-                  <div className="font-semibold text-sm">Copyeditor Tata Bahasa</div>
-                  <div className="text-xs text-slate-500">Perbaikan Ejaan, PUEBI, & alur kalimat</div>
-                </div>
-              </label>
-            </div>
-          </div>
-
-          <button 
-            onClick={processManuscript}
-            disabled={!file || isProcessing}
-            className={`w-full py-3 px-4 rounded-xl font-medium text-white shadow-sm flex justify-center items-center gap-2 transition-colors ${
-              !file || isProcessing ? 'bg-slate-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
-            }`}
-          >
-            {isProcessing ? (
-              <><RefreshCw className="w-5 h-5 animate-spin" /> Memproses...</>
-            ) : (
-              <><FileText className="w-5 h-5" /> Mulai Analisis</>
-            )}
-          </button>
-          
-          {errorMsg && (
-             <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm flex gap-2">
-               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-               <p>{errorMsg}</p>
-             </div>
-          )}
-        </div>
-
-        {/* Right column: Result */}
-        <div className="lg:col-span-2">
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 flex flex-col shadow-sm h-full min-h-[500px]">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="font-bold text-lg text-slate-800">Hasil Analisis & Revisi</h3>
-              {result && (
-                <button 
-                  onClick={downloadDocx}
-                  className="flex items-center gap-2 px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors"
-                >
-                  <Download className="w-4 h-4" />
-                  Unduh .docx
-                </button>
-              )}
-            </div>
-
-            {isProcessing ? (
-               <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-                 <RefreshCw className="w-10 h-10 animate-spin mb-4 text-indigo-500" />
-                 <p>AI sedang menganalisis naskah Anda berdasarkan basis pengetahuan...</p>
-                 <p className="text-sm mt-2 max-w-sm text-center">Proses ini mungkin memerlukan waktu beberapa puluh detik tergantung panjang naskah.</p>
-               </div>
-            ) : result ? (
-               <div className="flex-1 overflow-y-auto pr-2 bg-slate-50 rounded-xl p-5 border border-slate-100 markdown-body font-serif text-base text-slate-700">
-                 <ReactMarkdown>{result}</ReactMarkdown>
-               </div>
-            ) : (
-               <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-                 <FileText className="w-12 h-12 mb-4 text-slate-200" />
-                 <p>Hasil analisis akan muncul di sini</p>
-               </div>
-            )}
-          </div>
-        </div>
-
-      </div>
-    </div>
-  );
-}
+                  <div className="font-semibold text-sm">Editor
