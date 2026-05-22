@@ -3,8 +3,8 @@ import { UploadCloud, FileText, CheckCircle2, Download, AlertCircle, RefreshCw }
 import { AnalysisHistory, KnowledgeItem } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import ReactMarkdown from 'react-markdown';
-import mammoth from 'mammoth'; // Import pembaca .docx di frontend
-import { GoogleGenAI } from '@google/genai'; // Import mesin AI Gemini
+import mammoth from 'mammoth';
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 interface Props {
   knowledgeBase: KnowledgeItem[];
@@ -25,7 +25,6 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
     }
   };
 
-  // Fungsi pembantu mengekstrak file .docx langsung di browser
   const extractTextFromFile = (fileToExtract: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -58,7 +57,6 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
     setResult(null);
 
     try {
-      // 1. Susun Basis Pengetahuan (Knowledge Base)
       let kbContext = '';
       if (role === 'editor') {
         const templates = knowledgeBase.filter(k => k.type === 'template');
@@ -68,53 +66,22 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
         kbContext = refs.map(r => r.content).join('\n\n---\n\n');
       }
 
-      // 2. Ekstrak teks naskah penulis secara lokal
       const manuscriptText = await extractTextFromFile(file);
 
-      // 3. Hubungkan langsung ke SDK Gemini menggunakan API Key dari file .env
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+      const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
       
-      // 4. Tentukan instruksi spesifik berdasarkan tombol Mode Asisten yang dipilih
       let systemInstruction = "";
-      if (role === 'editor') {
-        systemInstruction = "Anda adalah seorang Editor Jurnal Ilmiah senior. Tugas Anda adalah memeriksa kesesuaian format naskah naskah berdasarkan gaya selingkung atau template yang disediakan.";
-      } else if (role === 'reviewer') {
-        systemInstruction = "Anda adalah seorang Reviewer Ahli (Mitra Bestari). Tugas Anda adalah menganalisis kedalaman substansi naskah ilmiah, metodologi, dan kontribusi ilmiahnya serta memberikan saran perbaikan konten.";
-      } else {
-        systemInstruction = "Anda adalah seorang Copyeditor Bahasa. Perbaiki naskah berdasarkan aturan PUEBI, ejaan, efektivitas kalimat, dan tata bahasa jurnal ilmiah.";
-      }
+      if (role === 'editor') systemInstruction = "Anda adalah Editor Jurnal Ilmiah senior. Periksa kesesuaian format berdasarkan gaya selingkung.";
+      else if (role === 'reviewer') systemInstruction = "Anda adalah Reviewer Ahli. Analisis substansi dan metodologi ilmiah.";
+      else systemInstruction = "Anda adalah Copyeditor Bahasa. Perbaiki ejaan dan tata bahasa.";
 
-      const prompt = `
-        ${systemInstruction}
-        
-        Berikut adalah teks dokumen acuan dari Basis Pengetahuan (Knowledge Base) yang harus kamu ikuti:
-        ${kbContext ? kbContext : "Tidak ada dokumen acuan spesifik yang diunggah. Gunakan standar umum jurnal ilmiah terakreditasi."}
-        
-        Tugas: Analisis naskah penulis di bawah ini. Berikan ulasan/rekomendasi perbaikan. Jika ada bagian kalimat yang direvisi atau diperbaiki, tandai bagian yang diubah dengan cetak tebal (bold) menggunakan format Markdown agar penulis mudah melihat perbedaannya.
-        
-        Naskah Penulis yang Harus Dianalisis:
-        ${manuscriptText}
-      `;
+      const prompt = `${systemInstruction}\n\nAcuan: ${kbContext || "Standar umum jurnal ilmiah."}\n\nNaskah: ${manuscriptText}\n\nTugas: Analisis naskah, tandai revisi dengan **bold** (Markdown).`;
 
-      // 5. Panggil model Gemini secara langsung dari browser (Client-Side)
-      const model = ai.getGenerativeModel({ model: "gemini-1.5-flash" });
-      const response = await model.generateContent({
-        contents: prompt,
-      });
-
-      const aiResultText = response.text;
+      const aiResponse = await model.generateContent(prompt);
+      const aiResultText = aiResponse.response.text();
       
-      if (!aiResultText) {
-        throw new Error('AI tidak mengembalikan respon yang valid.');
-      }
-
-      // Tampilkan hasil analisis AI ke layar komponen kanan
       setResult(aiResultText);
-
-      // Simpan riwayat ke menu Riwayat
-      let usedRefs: string[] = [];
-      if (role === 'editor') usedRefs = knowledgeBase.filter(k => k.type === 'template').map(t => t.title);
-      else if (role === 'reviewer' || role === 'copyeditor') usedRefs = knowledgeBase.filter(k => k.type === 'reference').map(t => t.title);
 
       onSaveHistory({
         id: uuidv4(),
@@ -123,12 +90,11 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
         date: new Date().toISOString(),
         originalText: manuscriptText,
         resultText: aiResultText,
-        kbReferences: usedRefs,
+        kbReferences: []
       });
 
     } catch (err: any) {
-      console.error(err);
-      setErrorMsg(err.message || 'Terjadi kesalahan saat meminta analisis dari AI');
+      setErrorMsg(err.message || 'Terjadi kesalahan sistem');
     } finally {
       setIsProcessing(false);
     }
@@ -136,65 +102,46 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
 
   const downloadDocx = async () => {
     if (!result) return;
-    
-    try {
-      // Catatan: Jika fitur unduh file ini nanti butuh backend terpisah, pastikan endpoint ini siap. 
-      // Untuk sementara, fungsi ini tetap dipertahankan sesuai struktur kode asli kamu.
-      const res = await fetch('/api/generate-docx', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: result })
-      });
-
-      if (!res.ok) throw new Error('Gagal membuat dokumen');
-
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Hasil_${role}_${file?.name || 'naskah.docx'}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Gagal mengunduh dokumen');
-    }
+    const blob = new Blob([result], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Hasil_${role}_${file?.name || 'naskah.docx'}`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
   };
 
   return (
     <div className="space-y-8">
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-slate-900 mb-2">Analisis Naskah Penulis</h2>
-        <p className="text-slate-500">Unggah naskah dan pilih mode analisis. AI akan memberikan ulasan dan menandai bagian yang diubah dengan cetak tebal.</p>
+        <h2 className="text-2xl font-bold text-slate-900 mb-2">Analisis Naskah</h2>
+        <p className="text-slate-500">Unggah naskah untuk dianalisis AI.</p>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-8">
-        
-        {/* Kolom Kiri: Tombol Unggah & Pilihan Mode */}
         <div className="lg:col-span-1 space-y-6">
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4">1. Unggah Naskah</h3>
-            <label className={`flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-6 cursor-pointer transition-colors ${file ? 'border-emerald-300 bg-emerald-50' : 'border-slate-300 hover:bg-slate-50'}`}>
-              {file ? (
-                <>
-                  <CheckCircle2 className="w-8 h-8 text-emerald-500 mb-2" />
-                  <span className="text-sm font-medium text-emerald-700 text-center">{file.name}</span>
-                </>
-              ) : (
-                <>
-                  <UploadCloud className="w-8 h-8 text-indigo-500 mb-2" />
-                  <span className="text-sm font-medium text-indigo-600">Pilih File .docx</span>
-                </>
-              )}
-              <input type="file" accept=".docx" className="hidden" onChange={handleFileChange} />
-            </label>
-          </div>
+          <label className="flex flex-col items-center p-6 border-2 border-dashed rounded-lg cursor-pointer hover:bg-slate-50">
+            <UploadCloud className="w-8 h-8 text-indigo-500 mb-2" />
+            <span className="text-sm font-medium">Pilih File .docx</span>
+            <input type="file" accept=".docx" className="hidden" onChange={handleFileChange} />
+          </label>
+          
+          <button 
+            onClick={processManuscript}
+            disabled={!file || isProcessing}
+            className="w-full py-3 bg-indigo-600 text-white rounded-xl"
+          >
+            {isProcessing ? 'Memproses...' : 'Mulai Analisis'}
+          </button>
+        </div>
 
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4">2. Pilih Mode Asisten</h3>
-            <div className="space-y-3">
-              <label className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${role === 'editor' ? 'border-indigo-500 bg-indigo-50 text-indigo-900' : 'border-slate-200 hover:border-indigo-200 hover:bg-slate-50'}`}>
-                <input type="radio" className="mt-1" checked={role === 'editor'} onChange={() => setRole('editor')} />
-                <div>
-                  <div className="font-semibold text-sm">Editor
+        <div className="lg:col-span-2">
+          <div className="bg-white p-6 rounded-2xl border min-h-[500px]">
+            {isProcessing ? <RefreshCw className="animate-spin w-10 h-10" /> : result ? <ReactMarkdown>{result}</ReactMarkdown> : <p>Hasil akan muncul di sini</p>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
