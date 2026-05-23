@@ -67,7 +67,7 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
 
       // 2. Inisialisasi AI (Di sini kamu selipkan API Key-mu)
       console.log("Langkah 2: Menginisialisasi AI...");
-      const apiKey = "AIzaSy..."; // <--- MASUKKAN API KEY KAMU DI SINI
+      const apiKey = "AIzaSyA2910jEh3J7b16O2KMbU9aUpL94ZTuDCw"; // <--- MASUKKAN API KEY KAMU DI SINI
       if (!apiKey || apiKey === "AIzaSy...") throw new Error("API Key belum diisi di kode.");
       
       const ai = new GoogleGenAI({ apiKey });
@@ -78,7 +78,7 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
 
       // 4. Panggil AI
       const aiResponse = await ai.models.generateContent({
-        model: 'gemini-2.0-flash',
+        model: 'gemini-1.5-flash',
         contents: prompt,
       });
       
