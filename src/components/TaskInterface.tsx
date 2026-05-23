@@ -5,13 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import ReactMarkdown from 'react-markdown';
 import mammoth from 'mammoth';
 import { GoogleGenAI } from '@google/genai'; // Menggunakan library asli kamu sesuai package.json
-} catch (err: any) {
-      console.error("DEBUG ERROR:", err); // Ini akan muncul di console
-      setErrorMsg('Error: ' + (err.message || 'Gagal terhubung ke AI')); // Ini akan muncul di layar web
-      alert('Error: ' + err.message); // Ini akan memaksa error muncul sebagai pop-up
-    } finally {
-      setIsProcessing(false);
-    }
+
 interface Props {
   knowledgeBase: KnowledgeItem[];
   onSaveHistory: (history: AnalysisHistory) => void;
