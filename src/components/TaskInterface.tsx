@@ -62,7 +62,8 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
       const manuscriptText = await extractTextFromFile(file);
 
       // Inisialisasi menggunakan class GoogleGenAI yang benar
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey: "AIzaSyA2910jEh3J7b16O2KMbU9aUpL94ZTuDCw" // Masukkan langsung API Key kamu di sini
+});
       
       let systemInstruction = "";
       if (role === 'editor') systemInstruction = "Anda adalah Editor Jurnal Ilmiah senior. Periksa kesesuaian format berdasarkan gaya selingkung.";
