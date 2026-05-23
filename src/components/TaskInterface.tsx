@@ -4,7 +4,7 @@ import { AnalysisHistory, KnowledgeItem } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import ReactMarkdown from 'react-markdown';
 import mammoth from 'mammoth';
-import { GoogleGenAI } from '@google/genai'; // Menggunakan library asli kamu sesuai package.json
+import { GoogleGenAI } from '@google/genai';
 
 interface Props {
   knowledgeBase: KnowledgeItem[];
@@ -43,16 +43,6 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
     });
   };
 
-  // ... (Bagian import dan setup state tetap sama)
-
-export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
-  // ... (State seperti file, role, dll tetap sama)
-
-  const extractTextFromFile = (fileToExtract: File): Promise<string> => {
-    // ... (Fungsi ini tetap sama)
-  };
-
-  // --- MULAI PENYELIPAN ---
   const processManuscript = async () => {
     if (!file) return;
     setIsProcessing(true);
@@ -60,57 +50,63 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
     setResult(null);
 
     try {
-      // 1. Cek File
       console.log("Langkah 1: Membaca file...");
       const manuscriptText = await extractTextFromFile(file);
       if (!manuscriptText) throw new Error("File kosong atau gagal dibaca.");
 
-      // 2. Inisialisasi AI (Di sini kamu selipkan API Key-mu)
-      console.log("Langkah 2: Menginisialisasi AI...");
-      const apiKey = "AIzaSyA2910jEh3J7b16O2KMbU9aUpL94ZTuDCw"; // <--- MASUKKAN API KEY KAMU DI SINI
-      if (!apiKey || apiKey === "AIzaSy...") throw new Error("API Key belum diisi di kode.");
+      // MASUKKAN API KEY KAMU DI BAWAH INI
+      const apiKey = "AIzaSyA2910jEh3J7b16O2KMbU9aUpL94ZTuDCw"; 
+      if (!apiKey || apiKey.includes("AIzaSy")) {
+         // ini sekadar pengecekan agar kodingan tidak error
+      }
       
       const ai = new GoogleGenAI({ apiKey });
       
-      // 3. Persiapan Prompt
-      console.log("Langkah 3: Mengirim ke Gemini...");
-      const prompt = `Analisis naskah berikut: ${manuscriptText}`;
+      let kbContext = '';
+      if (role === 'editor') {
+        const templates = knowledgeBase.filter(k => k.type === 'template');
+        kbContext = templates.map(t => t.content).join('\n\n---\n\n');
+      } else if (role === 'reviewer' || role === 'copyeditor') {
+        const refs = knowledgeBase.filter(k => k.type === 'reference');
+        kbContext = refs.map(r => r.content).join('\n\n---\n\n');
+      }
 
-      // 4. Panggil AI
+      let systemInstruction = "";
+      if (role === 'editor') systemInstruction = "Anda adalah Editor Jurnal Ilmiah senior. Periksa kesesuaian format berdasarkan gaya selingkung.";
+      else if (role === 'reviewer') systemInstruction = "Anda adalah Reviewer Ahli. Analisis substansi dan metodologi ilmiah.";
+      else systemInstruction = "Anda adalah Copyeditor Bahasa. Perbaiki ejaan dan tata bahasa.";
+
+      const prompt = `${systemInstruction}\n\nAcuan: ${kbContext || "Standar umum jurnal ilmiah."}\n\nNaskah: ${manuscriptText}\n\nTugas: Analisis naskah, tandai revisi dengan **bold** (Markdown).`;
+
+      console.log("Langkah 2: Mengirim ke Gemini...");
       const aiResponse = await ai.models.generateContent({
         model: 'gemini-1.5-flash',
         contents: prompt,
       });
       
-      // 5. Cek Respon
-      console.log("Langkah 4: Mendapatkan respon...", aiResponse);
-      if (!aiResponse || !aiResponse.text) {
-        throw new Error("AI tidak memberikan respon (Cek kuota API).");
-      }
+      const aiResultText = aiResponse.text;
+      if (!aiResultText) throw new Error('AI tidak mengembalikan respon yang valid.');
 
-      setResult(aiResponse.text);
+      setResult(aiResultText);
+      onSaveHistory({
+        id: uuidv4(),
+        filename: file.name,
+        role: role,
+        date: new Date().toISOString(),
+        originalText: manuscriptText,
+        resultText: aiResultText,
+        kbReferences: []
+      });
 
     } catch (err: any) {
-      // --- BAGIAN PENGIDENTIFIKASI KESALAHAN ---
       console.error("=== TERJADI KESALAHAN ===");
-      console.error("Lokasi Error:", err.stack);
       console.error("Pesan Error:", err.message);
-      
-      const userFriendlyMsg = `Error: ${err.message}`;
-      setErrorMsg(userFriendlyMsg);
-      alert("Gagal memproses! Periksa Inspect > Console untuk detail:\n\n" + userFriendlyMsg);
-      
+      setErrorMsg(err.message);
+      alert("Gagal memproses! Periksa Console untuk detail:\n" + err.message);
     } finally {
       setIsProcessing(false);
-      console.log("Selesai proses.");
     }
   };
-  // --- SELESAI PENYELIPAN ---
-
-  return (
-    // ... (Bagian return JSX tetap sama)
-  );
-}
 
   return (
     <div className="space-y-8 p-6">
@@ -144,23 +140,15 @@ export default function TaskInterface({ knowledgeBase, onSaveHistory }: Props) {
             <div className="space-y-3">
               <label className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${role === 'editor' ? 'border-indigo-500 bg-indigo-50 text-indigo-900' : 'border-slate-200 hover:border-indigo-200 hover:bg-slate-50'}`}>
                 <input type="radio" className="mt-1" checked={role === 'editor'} onChange={() => setRole('editor')} />
-                <div>
-                  <div className="font-semibold text-sm">Editor Jurnal</div>
-                </div>
+                <div><div className="font-semibold text-sm">Editor Jurnal</div></div>
               </label>
-
               <label className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${role === 'reviewer' ? 'border-indigo-500 bg-indigo-50 text-indigo-900' : 'border-slate-200 hover:border-indigo-200 hover:bg-slate-50'}`}>
                 <input type="radio" className="mt-1" checked={role === 'reviewer'} onChange={() => setRole('reviewer')} />
-                <div>
-                  <div className="font-semibold text-sm">Reviewer Substansi</div>
-                </div>
+                <div><div className="font-semibold text-sm">Reviewer Substansi</div></div>
               </label>
-
               <label className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${role === 'copyeditor' ? 'border-indigo-500 bg-indigo-50 text-indigo-900' : 'border-slate-200 hover:border-indigo-200 hover:bg-slate-50'}`}>
                 <input type="radio" className="mt-1" checked={role === 'copyeditor'} onChange={() => setRole('copyeditor')} />
-                <div>
-                  <div className="font-semibold text-sm">Copyeditor Bahasa</div>
-                </div>
+                <div><div className="font-semibold text-sm">Copyeditor Bahasa</div></div>
               </label>
             </div>
           </div>
